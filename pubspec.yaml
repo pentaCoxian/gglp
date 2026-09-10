@@ -1,0 +1,112 @@
+name: misskey_gglp
+description: "Cross-platform multi-server Misskey client with custom unified timelines, channel browsing, MFM rendering, and live reactions."
+publish_to: 'none'
+# Bump on every release. Format: <semver>+<buildNumber>. The build
+# number must increase for every published APK.
+version: 0.9.1+11
+
+environment:
+  sdk: ^3.7.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # state + DI
+  flutter_riverpod: ^2.6.1
+  # riverpod_annotation is deferred: requires riverpod_generator,
+  # which transitively pulls custom_lint_core / analyzer_plugin 0.12.0.
+  # That combination won't compile against the analyzer 7.x bundled in
+  # Dart 3.7.2. Upgrade Flutter to 3.32+ (Dart 3.9) and re-add then.
+  # riverpod_annotation: ^2.6.1
+
+  # routing
+  go_router: ^14.6.2
+
+  # models
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+  # http
+  dio: ^5.7.0
+
+  # websocket
+  web_socket_channel: ^3.0.1
+
+  # auth
+  flutter_web_auth_2: ^4.0.1
+
+  # storage
+  drift: ^2.20.3
+  drift_flutter: ^0.2.2
+  sqlite3_flutter_libs: ^0.5.24
+  flutter_secure_storage: ^9.2.2
+
+  # rendering
+  pretext: ^0.1.0
+  cached_network_image: ^3.4.1
+  visibility_detector: ^0.4.0+2
+
+  # animations (Tier 3 MFM)
+  flutter_animate: ^4.5.2
+
+  # push + local notifications
+  unifiedpush: ^5.0.1
+  flutter_local_notifications: ^17.2.4
+
+  # utility
+  collection: ^1.19.0
+  uuid: ^4.5.1
+  url_launcher: ^6.3.2
+
+  # Media picker for compose attachments. Uses the platform's
+  # native file selector (Storage Access Framework on Android, document
+  # browser on iOS/macOS, system picker on desktop) so we don't need
+  # READ_MEDIA_IMAGES / READ_EXTERNAL_STORAGE runtime permissions on
+  # Android.
+  file_picker: ^8.1.4
+
+  # Inline video playback inside the media viewer. The first-party
+  # plugin uses ExoPlayer on Android, AVFoundation on iOS/macOS, and
+  # native bindings on Windows / Linux as available.
+  video_player: ^2.9.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+  build_runner: ^2.4.13
+  freezed: ^2.5.7
+  json_serializable: ^6.8.0
+  drift_dev: ^2.20.3
+  # riverpod_generator + custom_lint + riverpod_lint pull analyzer_plugin
+  # 0.12.0 which fails to compile against analyzer 7.x (Dart 3.7.2 bundled).
+  # Re-add after Flutter upgrade to 3.32+ (Dart 3.9).
+  # riverpod_generator: ^2.6.3
+  # custom_lint: ^0.7.0
+  # riverpod_lint: ^2.6.3
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/fonts/LICENSE
+    - assets/licenses/android-apache-2.0.txt
+
+  # Roboto is bundled (Apache-2.0, googlefonts/roboto v2.138) so the
+  # App typography renders identically on iOS/macOS/Windows/
+  # Linux, where Roboto is not the platform default. 700 is required so
+  # MFM bold doesn't fall back to the 500 face.
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Roboto-Italic.ttf
+          weight: 400
+          style: italic
+        - asset: assets/fonts/Roboto-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Roboto-Bold.ttf
+          weight: 700
