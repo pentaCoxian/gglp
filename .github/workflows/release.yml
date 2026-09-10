@@ -36,7 +36,7 @@ jobs:
           flutter-version: '3.29.2'
           channel: stable
       - name: Install Android SDK
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.0.12077973'
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ''platforms;android-36'' ''build-tools;36.0.0'' ''ndk;27.0.12077973'''
       - run: flutter pub get --enforce-lockfile
       - run: flutter analyze
       - run: flutter test
