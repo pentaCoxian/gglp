@@ -14,6 +14,32 @@ class AppTheme {
 
   static ThemeData dark() => _build(Brightness.dark, PlusTheme.dark);
 
+  // Roboto has no CJK glyphs. Give the platform fallback a Japanese
+  // shaping locale so shared kanji use Japanese forms even when the UI
+  // language is English. Keep this on the styles so MFM spans, editable
+  // text and standalone text measurement inherit the same glyph choice.
+  static TextTheme _japaneseGlyphs(TextTheme theme) {
+    TextStyle? japanese(TextStyle? style) =>
+        style?.copyWith(locale: const Locale('ja'));
+    return theme.copyWith(
+      displayLarge: japanese(theme.displayLarge),
+      displayMedium: japanese(theme.displayMedium),
+      displaySmall: japanese(theme.displaySmall),
+      headlineLarge: japanese(theme.headlineLarge),
+      headlineMedium: japanese(theme.headlineMedium),
+      headlineSmall: japanese(theme.headlineSmall),
+      titleLarge: japanese(theme.titleLarge),
+      titleMedium: japanese(theme.titleMedium),
+      titleSmall: japanese(theme.titleSmall),
+      bodyLarge: japanese(theme.bodyLarge),
+      bodyMedium: japanese(theme.bodyMedium),
+      bodySmall: japanese(theme.bodySmall),
+      labelLarge: japanese(theme.labelLarge),
+      labelMedium: japanese(theme.labelMedium),
+      labelSmall: japanese(theme.labelSmall),
+    );
+  }
+
   static ThemeData _build(Brightness brightness, PlusTheme plus) {
     final isDark = brightness == Brightness.dark;
 
@@ -56,20 +82,21 @@ class AppTheme {
       inversePrimary: plus.link,
     );
 
-    final textTheme = plusTextTheme(plus);
-
     final base = ThemeData(
       colorScheme: scheme,
       useMaterial3: true,
       fontFamily: 'Roboto',
       fontFamilyFallback: const ['NotoColorEmoji'],
-      textTheme: textTheme,
+      textTheme: plusTextTheme(plus),
     );
+    final textTheme = _japaneseGlyphs(base.textTheme);
 
     OutlinedBorder rect([double r = PlusRadii.card]) =>
         RoundedRectangleBorder(borderRadius: BorderRadius.circular(r));
 
     return base.copyWith(
+      textTheme: textTheme,
+      primaryTextTheme: _japaneseGlyphs(base.primaryTextTheme),
       extensions: [plus],
       scaffoldBackgroundColor: plus.canvas,
       // Holo-era expanding splash, not the sparkle.
