@@ -247,7 +247,6 @@ def provenance(directory, source_sha, run_id, run_attempt):
             "gh", "attestation", "verify", str(directory / artifact),
             "--hostname", "github.com", "--repo", REPOSITORY,
             "--bundle", str(directory / "provenance.json"),
-            "--signer-workflow", f"{REPOSITORY}/{WORKFLOW}",
             "--cert-identity", WORKFLOW_IDENTITY,
             "--source-ref", "refs/heads/main", "--source-digest", source_sha,
             "--signer-digest", source_sha, "--deny-self-hosted-runners", "--format", "json"))

@@ -302,6 +302,10 @@ class ProvenanceTests(unittest.TestCase):
                                     ("--cert-identity", guard.WORKFLOW_IDENTITY), ("--format", "json")):
                     self.assertEqual(call[call.index(flag) + 1], value)
                 self.assertIn("--deny-self-hosted-runners", call)
+                # gh treats these identity selectors as mutually exclusive.
+                # The exact certificate identity also fixes the workflow ref.
+                for conflicting_flag in ("--signer-workflow", "--signer-repo", "--cert-identity-regex"):
+                    self.assertNotIn(conflicting_flag, call)
             with patch.object(guard, "run", side_effect=OSError("verification failed")), self.assertRaises(OSError):
                 guard.provenance(directory, SHA, "456", "2")
             with patch.object(guard, "run", return_value=json.dumps(attestation({}))), self.assertRaises(ValueError):
