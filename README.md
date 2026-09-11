@@ -106,25 +106,74 @@ Never commit the keystore or passwords. A lost release key prevents compatible
 updates to installed APKs. Debug-signed APKs cannot update release-signed APKs.
 
 Pull requests and `main` run tests and produce debug APK artifacts for 14 days.
-A `v<version>` tag on a commit from `main` builds a signed universal APK and
-publishes a GitHub Release after validation. The tag must match `pubspec.yaml`;
-the build number must increase for each release. Start with `0.9.1+11` / `v0.9.1`.
+A release requires a stable `v<version>` tag at the **current `main` commit**, a
+successful Android CI **push** run for that exact commit, and maintainer approval.
+The tag must match `pubspec.yaml`; version names and Android build numbers must
+increase. Tags alone do not start releases. After CI passes, run **Android
+release → Run workflow**, select `main`, and enter the tag.
 
-The canonical release workflow uses GitHub Actions secrets:
+The workflow builds and tests an unsigned APK without signing credentials.
+A fresh runner signs the approved candidate using `apksigner`, verifies the
+established GGLP signing certificate, and attests the APK and update manifest.
+A separate publishing job checks source, CI, signing certificate, package,
+version, alignment, checksums, and provenance tied to the same workflow run.
+Neither privileged runner executes Flutter, Gradle, application code or tests.
 
-- `ANDROID_KEYSTORE_BASE64`
-- `ANDROID_KEYSTORE_PASSWORD`
-- `ANDROID_KEY_ALIAS`
-- `ANDROID_KEY_PASSWORD`
+### Required GitHub protections
 
-These are available only to the release signing job, never fork pull requests.
-Release assets include the APK, `SHA256SUMS`, and `update.json`, generated from
-the built APK. Files are uploaded to a draft release and verified before it
-becomes visible to update checks. Published releases are not overwritten.
+These repository settings are required in addition to the workflow files.
+The release guard refuses to run with missing approval environments or
+unprotected `main`; adding an `environment:` entry alone does not protect it.
+
+1. Protect `main` with a ruleset that requires pull requests and the up-to-date
+   `check` status from GitHub Actions, blocks force pushes and deletion, and has
+   no bypass actors. A separate ruleset requires code-owner review, with an
+   administrator bypass limited to pull requests so the sole maintainer can
+   merge their own changes after CI passes. This exception cannot bypass CI.
+   `.github/CODEOWNERS` assigns application and workflow review to
+   `@pentaCoxian`. Remove the review exception when another trusted reviewer
+   is available.
+2. Protect `v*` tags against updates/deletion and restrict tag creation to
+   release maintainers. Review the exact source diff before creating a tag.
+3. Create **release-signing** and **release-publishing** environments. For both,
+   require `@pentaCoxian` approval, disable administrator bypass, and allow only
+   the `main` **branch** (no tag rules or wildcards). Review the commit and
+   candidate digest before signing approval; review the signed assets and
+   attestation before publication approval. A sole maintainer may approve their
+   own run; enable prevention of self-review when a second reviewer is available.
+4. Store `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+   `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD` **only in release-signing**.
+   Remove repository/organization copies accessible to this repository after
+   provisioning the environment from the original private credentials. GitHub
+   cannot return existing secret values for migration. Do not rotate the key:
+   installed apps must keep accepting updates signed by the established key.
+5. Keep default workflow token permissions read-only and disable workflow PR
+   approvals. Enable [release immutability](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes)
+   for future releases. Complete these settings before enabling the new workflow.
+
+Release assets include the APK, `update.json`, `SHA256SUMS`, and `provenance.json`.
+All assets are uploaded to a draft, downloaded again and checked before
+publication. Published releases are never overwritten. Consumers can verify
+the signed provenance with GitHub CLI (substitute the APK name and release SHA):
+
+```sh
+gh attestation verify gglp-X.Y.Z.apk --bundle provenance.json \
+  --repo pentaCoxian/gglp \
+  --signer-workflow pentaCoxian/gglp/.github/workflows/release.yml \
+  --source-ref refs/heads/main --source-digest RELEASE_COMMIT_SHA \
+  --signer-digest RELEASE_COMMIT_SHA --deny-self-hosted-runners
+```
+
+These controls establish approved source and artifact identity; passing tests
+or having an attestation does not prove code is harmless. Review remains
+necessary, and a compromised repository administrator or signing key is outside
+this protection boundary. Keep account recovery and signing backups secure.
 
 Forks must use their own signing key and configure their release repository;
 otherwise they must disable the updater. Change the updater repository constant in
 `lib/app/updates/update_manifest.dart` to your fork before building. Keep GitHub credentials out of the application.
+Fork releases also need their own certificate pin in `tool/release.py` and
+repository/reviewer policy in `tool/release_guard.py`.
 
 ## License
 

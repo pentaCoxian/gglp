@@ -7,14 +7,18 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// CI builds without a key, then signs on a fresh, approval-gated runner.
+// Ordinary local release builds still require the upload signing properties.
+val buildUnsignedRelease = providers.environmentVariable("GGLP_UNSIGNED_RELEASE").orNull == "true"
 val uploadProperties = Properties()
 val uploadPropertiesFile = rootProject.file("key.properties")
-if (uploadPropertiesFile.isFile) {
+if (!buildUnsignedRelease && uploadPropertiesFile.isFile) {
     uploadPropertiesFile.inputStream().use { uploadProperties.load(it) }
 }
 val uploadFields = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
 val hasUploadSigning = uploadFields.all { !uploadProperties.getProperty(it).isNullOrBlank() }
 val validateUploadSigning = tasks.register("validateUploadSigning") {
+    onlyIf { !buildUnsignedRelease }
     doLast {
         check(hasUploadSigning) {
             "Release signing requires android/key.properties with storeFile, storePassword, keyAlias, and keyPassword. See README.md."
@@ -64,7 +68,9 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("upload")
+            if (!buildUnsignedRelease) {
+                signingConfig = signingConfigs.getByName("upload")
+            }
         }
     }
     sourceSets.getByName("androidTest").assets.srcDir(layout.buildDirectory.dir("generated/update-test-assets"))

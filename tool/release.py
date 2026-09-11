@@ -13,14 +13,19 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import struct
 import subprocess
+import sys
 import tempfile
 import zipfile
 
 REPOSITORY = "pentaCoxian/gglp"
 PACKAGE_ID = "io.pentacoxian.gglp"
 MAX_APK_SIZE = 200 * 1024 * 1024
+MAX_METADATA_SIZE = 16 * 1024 * 1024
+# Permanent OSS signing identity, taken from the published v0.9.1 APK.
+SIGNING_CERTIFICATE_SHA256 = "d02a593d8084f0fa6d3c9f46ee7fd281118f739bfcce498ac23aa9e9781ca3a9"
 VERSION = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 MANIFEST_FIELDS = {
     "schemaVersion", "versionName", "versionCode", "packageId", "minSdk",
@@ -146,30 +151,69 @@ def validate_signature(certificate):
         raise ValueError("APK must have an Android v2 signature")
     if re.search(r"certificate DN:.*\bCN=Android Debug\b", certificate, re.IGNORECASE):
         raise ValueError("Release APK must not use an Android debug signing key")
+    count = re.findall(r"^Number of signers: ([0-9]+)$", certificate, re.MULTILINE)
+    digests = re.findall(r"^Signer #([0-9]+) certificate SHA-256 digest: ([0-9a-fA-F]+)$",
+                         certificate, re.MULTILINE)
+    if count != ["1"] or len(digests) != 1 or digests[0][0] != "1":
+        raise ValueError("Release APK must have exactly one signing certificate")
+    if digests[0][1].lower() != SIGNING_CERTIFICATE_SHA256:
+        raise ValueError("Release APK does not use the pinned OSS signing certificate")
 
 
-def prepare(apk, build_tools, tag, directory, pubspec):
+def regular_file(path, maximum):
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= maximum:
+        raise ValueError(f"Expected a nonempty regular file within its size limit: {path.name}")
+
+
+def validate_unsigned(apk, build_tools):
+    """Reject signed or malformed signature containers before exposing a key."""
+    with zipfile.ZipFile(apk) as archive:
+        if any(re.fullmatch(r"META-INF/(?:[^/]+\.(?:SF|RSA|DSA|EC)|SIG-[^/]+)",
+                            name, re.IGNORECASE) for name in archive.namelist()):
+            raise ValueError("Signing input must be an unsigned APK")
+        with apk.open("rb") as source:
+            source.seek(max(0, archive.start_dir - 16))
+            if source.read(16) == b"APK Sig Block 42":
+                raise ValueError("Signing input must not contain an APK signing block")
+    result = subprocess.run(
+        [str(build_tools / "apksigner"), "verify", "--verbose", str(apk)],
+        capture_output=True, text=True, check=False,
+    )
+    output = result.stdout + result.stderr
+    if result.returncode != 1 or "Missing META-INF/MANIFEST.MF" not in output:
+        raise ValueError("apksigner did not confirm an unsigned APK")
+
+
+def inspect(apk, build_tools, tag, pubspec, signed=False):
     version_name, version_code = source_version(pubspec.read_text(), tag)
-    if not 0 < apk.stat().st_size <= MAX_APK_SIZE:
-        raise ValueError("APK is empty or exceeds 200 MiB")
-    # apksigner exits nonzero for a malformed or invalid signature.
-    certificate = run(str(build_tools / "apksigner"), "verify", "--verbose",
-                      "--print-certs", str(apk))
-    validate_signature(certificate)
-    print(certificate)
+    regular_file(apk, MAX_APK_SIZE)
+    if signed:
+        certificate = run(str(build_tools / "apksigner"), "verify", "--verbose",
+                          "--print-certs", str(apk))
+        validate_signature(certificate)
+    else:
+        validate_unsigned(apk, build_tools)
     print(run(str(build_tools / "zipalign"), "-c", "-P", "16", "4", str(apk)))
     validate_native_libraries(apk)
     metadata = apk_metadata(run(str(build_tools / "aapt2"), "dump", "badging", str(apk)))
     if (metadata["versionName"], metadata["versionCode"]) != (version_name, version_code):
         raise ValueError("Built APK version does not match pubspec and tag")
+    return metadata
+
+
+def prepare(apk, build_tools, tag, directory, pubspec):
+    metadata = inspect(apk, build_tools, tag, pubspec, signed=True)
     manifest = validate_manifest({
         "schemaVersion": 1,
         **metadata,
-        "apkFileName": f"gglp-{version_name}.apk",
+        "apkFileName": f"gglp-{metadata['versionName']}.apk",
         "size": apk.stat().st_size,
         "sha256": sha256(apk),
     })
     directory.mkdir(parents=True, exist_ok=True)
+    if directory.is_symlink():
+        raise ValueError("Release directory must not be a symlink")
     if any(directory.iterdir()):
         raise ValueError("Release output directory must be empty")
     shutil.copyfile(apk, directory / manifest["apkFileName"])
@@ -180,48 +224,102 @@ def prepare(apk, build_tools, tag, directory, pubspec):
     print(json.dumps(manifest, indent=2))
 
 
-def property_value(value):
-    replacements = {"\\": "\\\\", "\n": "\\n", "\r": "\\r", "\t": "\\t",
-                    " ": "\\ ", "=": "\\=", ":": "\\:", "#": "\\#", "!": "\\!"}
-    return "".join(replacements.get(char, char) for char in value)
-
-
-def configure_signing():
+def sign(apk, build_tools, output):
+    """Sign a candidate without running Gradle or writing repository credentials."""
     names = ("ANDROID_KEYSTORE_BASE64", "ANDROID_KEYSTORE_PASSWORD",
              "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD", "RUNNER_TEMP")
     if any(not os.environ.get(name) for name in names):
         raise ValueError("Release signing secrets and RUNNER_TEMP must be configured")
-    key = base64.b64decode(os.environ[names[0]], validate=True)
-    if not key:
-        raise ValueError("Release keystore is empty")
-    path = Path(os.environ["RUNNER_TEMP"]) / "gglp-release.jks"
-    values = {
-        "storeFile": str(path.resolve()),
-        "storePassword": os.environ[names[1]],
-        "keyAlias": os.environ[names[2]],
-        "keyPassword": os.environ[names[3]],
-    }
-    os.umask(0o077)
-    # Exclusive creation prevents replacing a pre-existing local keystore.
-    with path.open("xb") as target:
-        target.write(key)
-    with Path("android/key.properties").open("x", encoding="ascii") as target:
-        target.write("".join(f"{key}={property_value(value)}\n" for key, value in values.items()))
+    regular_file(apk, MAX_APK_SIZE)
+    if output.exists() or output.is_symlink():
+        raise ValueError("Signed APK output must not already exist")
+    with tempfile.TemporaryDirectory(prefix="gglp-sign-", dir=os.environ["RUNNER_TEMP"]) as temporary:
+        directory = Path(temporary)
+        candidate = directory / "candidate.apk"
+        shutil.copyfile(apk, candidate)
+        validate_unsigned(candidate, build_tools)
+        print(run(str(build_tools / "zipalign"), "-c", "-P", "16", "4", str(candidate)))
+        validate_native_libraries(candidate)
+        apk_metadata(run(str(build_tools / "aapt2"), "dump", "badging", str(candidate)))
+        key = base64.b64decode(os.environ[names[0]], validate=True)
+        if not key:
+            raise ValueError("Release keystore is empty")
+        path = directory / "upload.jks"
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as target:
+            target.write(key)
+        del key
+        signed = directory / "signed.apk"
+        environment = os.environ.copy()
+        environment.pop("ANDROID_KEYSTORE_BASE64", None)
+        subprocess.check_output([
+            str(build_tools / "apksigner"), "sign", "--ks", str(path),
+            "--ks-key-alias", os.environ[names[2]],
+            "--ks-pass", "env:ANDROID_KEYSTORE_PASSWORD",
+            "--key-pass", "env:ANDROID_KEY_PASSWORD",
+            "--out", str(signed), str(candidate),
+        ], env=environment, text=True)
+        regular_file(signed, MAX_APK_SIZE)
+        validate_signature(run(str(build_tools / "apksigner"), "verify", "--verbose",
+                               "--print-certs", str(signed)))
+        print(run(str(build_tools / "zipalign"), "-c", "-P", "16", "4", str(signed)))
+        output.parent.mkdir(parents=True, exist_ok=True)
+        # Exclusive creation prevents following an output symlink or replacing a build.
+        try:
+            with output.open("xb") as target, signed.open("rb") as source:
+                shutil.copyfileobj(source, target)
+        except FileExistsError:
+            raise
+        except BaseException:
+            output.unlink(missing_ok=True)
+            raise
+    print(f"Signed APK verified with the pinned OSS certificate: {output}")
 
 
-def validate_assets(directory, tag):
+def asset_inputs(directory, tag):
+    if not re.fullmatch(rf"v{VERSION}", tag):
+        raise ValueError("Release tag must be a stable vX.Y.Z version")
+    if not stat.S_ISDIR(directory.lstat().st_mode):
+        raise ValueError("Release directory must be a real directory, not a symlink")
+    names = [f"gglp-{tag[1:]}.apk", "update.json", "provenance.json", "SHA256SUMS"]
+    if {path.name for path in directory.iterdir()} != set(names):
+        raise ValueError("Release directory must contain exactly APK, update.json, provenance.json, SHA256SUMS")
+    for name in names:
+        regular_file(directory / name, MAX_APK_SIZE if name.endswith(".apk") else MAX_METADATA_SIZE)
     manifest = validate_manifest(json.loads((directory / "update.json").read_text()))
     if tag != "v" + manifest["versionName"]:
         raise ValueError("Release tag does not match update manifest")
-    names = [manifest["apkFileName"], "update.json", "SHA256SUMS"]
-    if {path.name for path in directory.iterdir()} != set(names):
-        raise ValueError("Release directory must contain exactly APK, update.json, SHA256SUMS")
     apk = directory / names[0]
     if apk.stat().st_size != manifest["size"] or sha256(apk) != manifest["sha256"]:
         raise ValueError("APK does not match update manifest")
-    expected = "".join(f"{sha256(directory / name)}  {name}\n" for name in names[:2])
+    return manifest, names
+
+
+def checksum_text(directory, names):
+    return "".join(f"{sha256(directory / name)}  {name}\n" for name in names)
+
+
+def validate_assets(directory, tag):
+    manifest, names = asset_inputs(directory, tag)
+    expected = checksum_text(directory, names[:-1])
     if (directory / "SHA256SUMS").read_text() != expected:
         raise ValueError("Release checksums do not match assets")
+    return manifest, names
+
+
+def seal(directory, tag):
+    """Bind the attestation bundle to the exact prepared release assets."""
+    _, names = asset_inputs(directory, tag)
+    if (directory / "SHA256SUMS").read_text() != checksum_text(directory, names[:2]):
+        raise ValueError("Prepared APK and manifest checksums do not match")
+    (directory / "SHA256SUMS").write_text(checksum_text(directory, names[:-1]))
+    validate_assets(directory, tag)
+
+
+def verify(directory, tag, build_tools, pubspec):
+    manifest, names = validate_assets(directory, tag)
+    metadata = inspect(directory / manifest["apkFileName"], build_tools, tag, pubspec, signed=True)
+    if any(manifest[key] != value for key, value in metadata.items()):
+        raise ValueError("Update manifest does not match independently inspected APK metadata")
     return manifest, names
 
 
@@ -235,8 +333,21 @@ def check_monotonic(candidate, previous):
             raise ValueError("Stable release version must exceed every published version")
 
 
-def publish(directory, tag):
-    manifest, names = validate_assets(directory, tag)
+def authorize_publication(directory, tag):
+    names = ("GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT")
+    if any(not os.environ.get(name) for name in names):
+        raise ValueError("Publishing requires a verified GitHub Actions workflow context")
+    guard = str(Path(__file__).resolve().with_name("release_guard.py"))
+    run(sys.executable, guard, "source", "--tag", tag)
+    run(sys.executable, guard, "provenance", "--directory", str(directory),
+        "--source-sha", os.environ[names[0]], "--run-id", os.environ[names[1]],
+        "--run-attempt", os.environ[names[2]])
+
+
+def publish(directory, tag, build_tools, pubspec):
+    manifest, names = verify(directory, tag, build_tools, pubspec)
+    authorize_publication(directory, tag)
+    validated_digests = {name: sha256(directory / name) for name in names}
     pages = json.loads(run("gh", "api", "--paginate", "--slurp",
                           f"repos/{REPOSITORY}/releases?per_page=100"))
     releases = [release for page in pages for release in page]
@@ -271,8 +382,11 @@ def publish(directory, tag):
         run("gh", "release", "download", tag, "--repo", REPOSITORY, "--dir", temporary)
         validate_assets(Path(temporary), tag)
         for name in names:
-            if sha256(Path(temporary) / name) != sha256(directory / name):
+            if sha256(Path(temporary) / name) != validated_digests[name]:
                 raise ValueError(f"Uploaded {name} differs from the validated build")
+    # Recheck source approval and cryptographic provenance immediately before
+    # the only transition that makes these assets a public release.
+    authorize_publication(directory, tag)
     run("gh", "release", "edit", tag, "--repo", REPOSITORY, "--draft=false", "--latest")
     print(f"Published https://github.com/{REPOSITORY}/releases/tag/{tag}")
 
@@ -283,26 +397,41 @@ def main():
     version = commands.add_parser("version", help="Check pubspec version and release tag")
     version.add_argument("--tag", required=True)
     version.add_argument("--pubspec", type=Path, default=Path("pubspec.yaml"))
-    commands.add_parser("signing", help="Create CI signing files from environment secrets")
+    inspection = commands.add_parser("inspect", help="Validate an unsigned release candidate")
+    inspection.add_argument("--apk", type=Path, required=True)
+    inspection.add_argument("--build-tools", type=Path, required=True)
+    inspection.add_argument("--tag", required=True)
+    inspection.add_argument("--pubspec", type=Path, default=Path("pubspec.yaml"))
+    signing = commands.add_parser("sign", help="Sign an APK in an isolated temporary directory")
+    signing.add_argument("--apk", type=Path, required=True)
+    signing.add_argument("--build-tools", type=Path, required=True)
+    signing.add_argument("--output", type=Path, required=True)
     preparation = commands.add_parser("prepare", help="Validate signed APK and create release assets")
     preparation.add_argument("--apk", type=Path, required=True)
     preparation.add_argument("--build-tools", type=Path, required=True)
     preparation.add_argument("--tag", required=True)
     preparation.add_argument("--directory", type=Path, required=True)
     preparation.add_argument("--pubspec", type=Path, default=Path("pubspec.yaml"))
+    sealing = commands.add_parser("seal", help="Include the provenance bundle in release checksums")
+    sealing.add_argument("--tag", required=True)
+    sealing.add_argument("--directory", type=Path, required=True)
+    verification = commands.add_parser("verify", help="Independently verify all release assets and APK identity")
+    verification.add_argument("--tag", required=True)
+    verification.add_argument("--directory", type=Path, required=True)
+    verification.add_argument("--build-tools", type=Path, required=True)
+    verification.add_argument("--pubspec", type=Path, default=Path("pubspec.yaml"))
     publication = commands.add_parser("publish", help="Verify assets, then publish a GitHub draft")
     publication.add_argument("--tag", required=True)
     publication.add_argument("--directory", type=Path, required=True)
+    publication.add_argument("--build-tools", type=Path, required=True)
+    publication.add_argument("--pubspec", type=Path, default=Path("pubspec.yaml"))
     arguments = vars(parser.parse_args())
     command = arguments.pop("command")
     if command == "version":
         print(source_version(arguments["pubspec"].read_text(), arguments["tag"]))
-    elif command == "signing":
-        configure_signing()
-    elif command == "prepare":
-        prepare(**arguments)
     else:
-        publish(**arguments)
+        {"inspect": inspect, "sign": sign, "prepare": prepare, "seal": seal,
+         "verify": verify, "publish": publish}[command](**arguments)
 
 
 if __name__ == "__main__":
