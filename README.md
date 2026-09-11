@@ -4,6 +4,26 @@ A Flutter client for Misskey with multiple accounts, combined timelines, MFM,
 custom emoji, reactions, channels, and media posting. GGLP is an independent
 client; it is not affiliated with Misskey's server operators.
 
+## Screenshots
+
+| MFM formatting | Photo grids | Link previews |
+| --- | --- | --- |
+| [![MFM formatting](screenshots/09-mfm-ja.png)](screenshots/09-mfm-ja.png) | [![Four-photo grid](screenshots/02c-four-photos-ja.png)](screenshots/02c-four-photos-ja.png) | [![Link previews](screenshots/03-links-ja.png)](screenshots/03-links-ja.png) |
+| **Quote notes** | **Custom timelines** | **Note composer** |
+| [![Quote notes](screenshots/04-quotes-ja.png)](screenshots/04-quotes-ja.png) | [![Custom timeline editor](screenshots/06-custom-editor-ja.png)](screenshots/06-custom-editor-ja.png) | [![Note composer](screenshots/07-compose-ja.png)](screenshots/07-compose-ja.png) |
+
+Screenshots use Japanese demo posts, fictional accounts and server names.
+
+<details>
+<summary>Screenshot media credits</summary>
+
+- Server emoji come from the public [misskey.io](https://misskey.io/api/emojis), [misskey.art](https://misskey.art/api/emojis), and [misskey.systems](https://misskey.systems/api/emojis) catalogs. Their artwork belongs to its respective creators and is not covered by GGLP's MIT license.
+- Kyoto photographs: Daderot, CC0 ([garden](https://commons.wikimedia.org/wiki/File:Cherry_blossoms_-_Sh%C5%8Dsei-en_-_Kyoto,_Japan_-_DSC07031.jpg), [tree](https://commons.wikimedia.org/wiki/File:Cherry_blossoms_-_Sh%C5%8Dsei-en_-_Kyoto,_Japan_-_DSC06878.jpg), [cherry tree](https://commons.wikimedia.org/wiki/File:Cherry_blossoms_-_Sh%C5%8Dsei-en_-_Kyoto,_Japan_-_DSC06868.jpg), [garden pond](https://commons.wikimedia.org/wiki/File:Tekisui-ken_and_Ingetsu-chi_Pond_-_Sh%C5%8Dsei-en_-_Kyoto,_Japan_-_DSC06894.jpg)).
+- Profile photographs: [Pavel Kovalev](https://commons.wikimedia.org/wiki/File:Portrait_of_a_cat1.jpg), [HJAndrews](https://commons.wikimedia.org/wiki/File:BAPhoto-Portrait.jpg), and [Karen Arnold](https://commons.wikimedia.org/wiki/File:Dog-portrait-1367008135LpJ.jpg), CC0.
+- The [Misskey Hub](https://misskey-hub.net/ja/) card uses the site's published preview title, description and thumbnail; © its respective creators, including the Misskey Project.
+
+</details>
+
 ## Install
 
 Download the universal APK from [GitHub Releases](https://github.com/pentaCoxian/gglp/releases).
