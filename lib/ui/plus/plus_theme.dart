@@ -179,9 +179,12 @@ class PlusTheme extends ThemeExtension<PlusTheme> {
   ];
 
   // Typography overflow — slots Flutter's TextTheme doesn't carry.
+  // Component themes can use these directly without inheriting TextTheme,
+  // so they need the same Japanese glyph hint as the main type ramp.
 
   /// Username, visibility, and timestamp metadata (13/18).
   TextStyle get metadata => TextStyle(
+    locale: const Locale('ja'),
     fontSize: 13,
     height: 18 / 13,
     fontWeight: FontWeight.w400,
@@ -191,6 +194,7 @@ class PlusTheme extends ThemeExtension<PlusTheme> {
 
   /// Counters and helper text (12/16), tertiary-colored.
   TextStyle get caption => TextStyle(
+    locale: const Locale('ja'),
     fontSize: 12,
     height: 16 / 12,
     fontWeight: FontWeight.w400,

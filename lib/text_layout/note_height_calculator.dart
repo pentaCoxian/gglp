@@ -208,6 +208,7 @@ class NoteHeightCalculator {
     final tp = TextPainter(
       text: span,
       textDirection: TextDirection.ltr,
+      locale: bodyStyle.locale,
       maxLines: null,
       textScaler: TextScaler.linear(textScaleFactor),
     );
